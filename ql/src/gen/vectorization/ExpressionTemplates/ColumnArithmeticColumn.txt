@@ -24,6 +24,8 @@ import org.apache.hadoop.hive.ql.exec.vector.*;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.exec.vector.VectorExpressionDescriptor;
 
+import com.amd.aparapi.Kernel;
+
 /**
  * Generated from template ColumnArithmeticColumn.txt, which covers binary arithmetic 
  * expressions between columns.
@@ -35,6 +37,7 @@ public class <ClassName> extends VectorExpression {
   private int colNum1;
   private int colNum2;
   private int outputColumn;
+  private static MyKernel kernel = new MyKernel();
 
   public <ClassName>(int colNum1, int colNum2, int outputColumn) {
     this.colNum1 = colNum1;
@@ -44,6 +47,89 @@ public class <ClassName> extends VectorExpression {
 
   public <ClassName>() {
   }
+
+    private static class MyKernel extends Kernel {
+    	private <OperandType1>[] vector1;
+    	private <OperandType2>[] vector2;
+    	private <ReturnType>[] outputVector;
+    	private boolean[] selectedRepeating;
+    	private int[] sel;
+    	
+    	public MyKernel() {
+			super();
+		}
+
+    	public MyKernel setVector1(<OperandType1>[] val) {
+    		this.vector1 = val;
+    		return this;
+    	}
+
+    	public MyKernel setVector2(<OperandType2>[] val) {
+    		this.vector2 = val;
+    		return this;
+    	}
+
+    	public MyKernel setOutputVector(<ReturnType>[] val) {
+    		this.outputVector = val;
+    		return this;
+    	}
+
+		public MyKernel setSelectedRepeating(boolean[] val) {
+			this.selectedRepeating = val;
+			return this;
+		}
+		
+		public MyKernel setSel(int[] val) {
+			this.sel = val;
+			return this;
+		}
+		
+		@Override
+    	public void run() {
+    		int j = getGlobalId();
+    		if(selectedRepeating[1]) {
+    			if(selectedRepeating[0]) {
+    				int i = sel[j];
+          			outputVector[i] = vector1[0] <OperatorSymbol> vector2[i];
+    			}
+    			else {
+    				outputVector[j] = vector1[0] <OperatorSymbol> vector2[j];
+    			}
+    		}
+    		else if(selectedRepeating[2]) {
+    			if(selectedRepeating[0]) {
+		            int i = sel[j];
+		            outputVector[i] = vector1[i] <OperatorSymbol> vector2[0];
+    			}
+    			else {
+    				outputVector[j] = vector1[j] <OperatorSymbol> vector2[0];
+    			}
+    		}
+    		else {
+    			if(selectedRepeating[0]) {
+		            int i = sel[j];
+		            outputVector[i] = vector1[i] <OperatorSymbol> vector2[i];
+    			}
+    			else {
+    				outputVector[j] = vector1[j] <OperatorSymbol>  vector2[j];
+    			}
+    		}
+    	}
+    } // end class MyKernel
+    
+    private static void executeOnDevice(MyKernel kernel, <OperandType1>[] vector1, <OperandType2>[] vector2, <ReturnType>[] outputVector, boolean[] selectedRepeating, int[] sel) {
+    	//System.out.println("Execution mode: " + kernel.getExecutionMode());
+        //long t1_g = System.currentTimeMillis();
+        // send parameters and execute, copy the OpenCL-hosted array back to RAM
+        kernel.setVector1(vector1).setVector2(vector2).setOutputVector(outputVector).setSelectedRepeating(selectedRepeating).setSel(sel);
+        kernel.put(vector1).put(vector2).put(outputVector).put(selectedRepeating).put(sel);
+        int kernelRange = vector1.length;
+        if(selectedRepeating[1])
+        	kernelRange = vector2.length;
+        kernel.execute(kernelRange).get(outputVector);
+		//long t2_g = System.currentTimeMillis();
+		//System.out.println("Device " + kernel.getExecutionMode() + " time diff: " + (t2_g-t1_g) + " ms");
+    }
 
   @Override
   public void evaluate(VectorizedRowBatch batch) {
@@ -80,42 +166,12 @@ public class <ClassName> extends VectorExpression {
      * more inputs are null. This is to improve speed by avoiding
      * conditional checks in the inner loop.
      */ 
+    boolean[] selectedRepeating = new boolean[] { batch.selectedInUse, inputColVector1.isRepeating, inputColVector2.isRepeating };
     if (inputColVector1.isRepeating && inputColVector2.isRepeating) { 
       outputVector[0] = vector1[0] <OperatorSymbol> vector2[0];
-    } else if (inputColVector1.isRepeating) {
-      if (batch.selectedInUse) {
-        for(int j = 0; j != n; j++) {
-          int i = sel[j];
-          outputVector[i] = vector1[0] <OperatorSymbol> vector2[i];
-        }
-      } else {
-        for(int i = 0; i != n; i++) {
-          outputVector[i] = vector1[0] <OperatorSymbol> vector2[i];
-        }
-      }
-    } else if (inputColVector2.isRepeating) {
-      if (batch.selectedInUse) {
-        for(int j = 0; j != n; j++) {
-          int i = sel[j];
-          outputVector[i] = vector1[i] <OperatorSymbol> vector2[0];
-        }
-      } else {
-        for(int i = 0; i != n; i++) {
-          outputVector[i] = vector1[i] <OperatorSymbol> vector2[0];
-        }
-      }
     } else {
-      if (batch.selectedInUse) {
-        for(int j = 0; j != n; j++) {
-          int i = sel[j];
-          outputVector[i] = vector1[i] <OperatorSymbol> vector2[i];
-        }
-      } else {
-        for(int i = 0; i != n; i++) {
-          outputVector[i] = vector1[i] <OperatorSymbol>  vector2[i];
-        }
-      }
-    }
+    	executeOnDevice(kernel, vector1, vector2, outputVector, selectedRepeating, sel);
+    } 
     
     /* For the case when the output can have null values, follow 
      * the convention that the data values must be 1 for long and 
