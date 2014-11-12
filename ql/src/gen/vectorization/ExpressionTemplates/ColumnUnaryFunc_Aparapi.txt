@@ -24,8 +24,11 @@ import org.apache.hadoop.hive.ql.exec.vector.*;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.exec.vector.VectorExpressionDescriptor;
 
+import com.amd.aparapi.Kernel;
+import static java.lang.Math.<FuncName>;
+
 /**
- * Generated from template ColumnUnaryFunc.txt, which covers binary arithmetic 
+ * Generated from template ColumnUnaryFunc_Aparapi.txt, which covers binary arithmetic 
  * expressions between columns.
  */
 public class <ClassName> extends VectorExpression {
@@ -33,6 +36,7 @@ public class <ClassName> extends VectorExpression {
 
   private int colNum;
   private int outputColumn;
+  private static MyKernel kernel = new MyKernel();
 
   public <ClassName>(int colNum, int outputColumn) {
     this();
@@ -43,6 +47,86 @@ public class <ClassName> extends VectorExpression {
   public <ClassName>() {
     super();
   }
+    private static class MyKernel extends Kernel {
+    	private <OperandType>[] vector;
+    	private <ReturnType>[] outputVector;
+    	private boolean[] selectedNoNulls;
+    	private boolean[] inputIsNull;
+    	private boolean[] outputIsNull;
+    	private int[] sel;
+    	
+    	public MyKernel() {
+			super();
+			setExplicit(true);
+		}
+
+    	public MyKernel setVector(<OperandType>[] val) {
+    		this.vector = val;
+    		return this;
+    	}
+
+    	public MyKernel setOutputVector(<ReturnType>[] val) {
+    		this.outputVector = val;
+    		return this;
+    	}
+
+		public MyKernel setSelectedNoNulls(boolean[] val) {
+			this.selectedNoNulls = val;
+			return this;
+		}
+
+    	public MyKernel setInputIsNull(boolean[] val) {
+    		this.inputIsNull = val;
+    		return this;
+    	}
+
+    	public MyKernel setOutputIsNull(boolean[] val) {
+    		this.outputIsNull = val;
+    		return this;
+    	}
+
+		public MyKernel setSel(int[] val) {
+			this.sel = val;
+			return this;
+		}
+		
+		@Override
+    	public void run() {
+    		int j = getGlobalId();
+    		if(selectedNoNulls[1]) {
+    			if(selectedNoNulls[0]) {
+    				int i = sel[j];
+          			outputVector[i] = <ResultCast> <FuncName>(<OperandCast> vector[i]);;
+    			}
+    			else {
+    				outputVector[j] = <ResultCast> <FuncName>(<OperandCast> vector[j]);;
+    			}
+    		}
+    		else {
+    			if(selectedNoNulls[0]) {
+					int i = sel[j];
+          			outputVector[i] = <ResultCast> <FuncName>(<OperandCast> vector[i]);
+          			outputIsNull[i] = inputIsNull[i];
+    			}
+    			else {
+    				outputVector[j] = <ResultCast> <FuncName>(<OperandCast> vector[j]);
+    				outputIsNull[j] = inputIsNull[j];
+    			}
+    		}
+    	}
+    } // end class MyKernel
+    
+    private static void executeOnDevice(MyKernel kernel, <OperandType>[] vector, <ReturnType>[] outputVector, boolean[] selectedNoNulls, boolean[] inputIsNull, boolean[] outputIsNull, int[] sel) {
+    	//System.out.println("Execution mode: " + kernel.getExecutionMode());
+        //long t1_g = System.currentTimeMillis();
+        // send parameters and execute, copy the OpenCL-hosted array back to RAM
+        kernel.setVector(vector).setOutputVector(outputVector).setSelectedNoNulls(selectedNoNulls).setInputIsNull(inputIsNull).setOutputIsNull(outputIsNull).setSel(sel);
+        kernel.put(vector).put(outputVector).put(selectedNoNulls).put(inputIsNull).put(outputIsNull).put(sel);
+        int kernelRange = vector.length;
+        kernel.execute(kernelRange).get(outputVector);
+		//long t2_g = System.currentTimeMillis();
+		//System.out.println("Device " + kernel.getExecutionMode() + " time diff: " + (t2_g-t1_g) + " ms");
+    }
 
   @Override
   public void evaluate(VectorizedRowBatch batch) {
@@ -66,6 +150,7 @@ public class <ClassName> extends VectorExpression {
       return;
     }
 
+	boolean[] selectedNoNulls = new boolean[] { batch.selectedInUse, inputColVector.noNulls };
     if (inputColVector.isRepeating) {
       //All must be selected otherwise size would be zero
       //Repeating property will not change.
@@ -73,33 +158,10 @@ public class <ClassName> extends VectorExpression {
       // Even if there are no nulls, we always copy over entry 0. Simplifies code.
       outputIsNull[0] = inputIsNull[0]; 
       outputColVector.isRepeating = true;
-    } else if (inputColVector.noNulls) {
-      if (batch.selectedInUse) {
-        for(int j = 0; j != n; j++) {
-          int i = sel[j];
-          outputVector[i] = <ResultCast> <FuncName>(<OperandCast> vector[i]);
-        }
-      } else {
-        for(int i = 0; i != n; i++) {
-          outputVector[i] = <ResultCast> <FuncName>(<OperandCast> vector[i]);
-        }
-      }
-      outputColVector.isRepeating = false;
-    } else /* there are nulls */ {
-      if (batch.selectedInUse) {
-        for(int j = 0; j != n; j++) {
-          int i = sel[j];
-          outputVector[i] = <ResultCast> <FuncName>(<OperandCast> vector[i]);
-          outputIsNull[i] = inputIsNull[i];
-	    }
-      } else {
-        for(int i = 0; i != n; i++) {
-          outputVector[i] = <ResultCast> <FuncName>(<OperandCast> vector[i]);
-        }
-        System.arraycopy(inputIsNull, 0, outputIsNull, 0, n);
-      }
-      outputColVector.isRepeating = false;
-    }
+    } else {
+    	executeOnDevice(kernel, vector, outputVector, selectedNoNulls, inputIsNull, outputIsNull, sel);
+    	outputColVector.isRepeating = false;
+    } 
     <Cleanup>
   }
 

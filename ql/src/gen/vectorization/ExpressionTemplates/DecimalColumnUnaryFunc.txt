@@ -29,6 +29,10 @@ import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.expressions.DecimalUtil;
 import java.util.Arrays;
 
+/**
+ * Generated from template DecimalColumnUnaryFunc.txt, which covers binary arithmetic 
+ * expressions between columns.
+ */
 public class <ClassName> extends VectorExpression {
   private static final long serialVersionUID = 1L;
 

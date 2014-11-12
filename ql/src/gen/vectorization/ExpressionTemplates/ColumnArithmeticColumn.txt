@@ -57,6 +57,7 @@ public class <ClassName> extends VectorExpression {
     	
     	public MyKernel() {
 			super();
+			setExplicit(true);
 		}
 
     	public MyKernel setVector1(<OperandType1>[] val) {
